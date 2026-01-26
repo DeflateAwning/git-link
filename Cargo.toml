@@ -1,9 +1,17 @@
 [package]
 name = "git-link"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "`git link` alias to fetch a link to a remote git repo"
 license = "Unlicense"
+
+repository = "https://github.com/DeflateAwning/git-link"
+homepage = "https://github.com/DeflateAwning/git-link"
+
+keywords = ["git", "cli", "developer-tools"]
+categories = ["command-line-utilities", "development-tools"]
+
+authors = ["DeflateAwning"]
 
 [dependencies]
 clap = { version = "4.5.54", features = ["derive"] }
