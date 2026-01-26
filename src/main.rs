@@ -1,5 +1,5 @@
-use std::process::{Command, exit};
 use clap::{Parser, Subcommand};
+use std::process::{Command, exit};
 
 /// Generate links for the current Git repository
 #[derive(Parser)]
@@ -21,13 +21,10 @@ enum Commands {
 }
 
 fn run(cmd: &str, args: &[&str]) -> String {
-    let output = Command::new(cmd)
-        .args(args)
-        .output()
-        .unwrap_or_else(|_| {
-            eprintln!("Failed to run {}", cmd);
-            exit(1);
-        });
+    let output = Command::new(cmd).args(args).output().unwrap_or_else(|_| {
+        eprintln!("Failed to run {}", cmd);
+        exit(1);
+    });
 
     if !output.status.success() {
         eprintln!("Command failed: {} {:?}", cmd, args);
@@ -40,10 +37,7 @@ fn run(cmd: &str, args: &[&str]) -> String {
 pub fn normalize_remote(remote: &str) -> String {
     // HTTPS: https://host/org/repo(.git)
     if let Some(rest) = remote.strip_prefix("https://") {
-        return format!(
-            "https://{}",
-            rest.strip_suffix(".git").unwrap_or(rest)
-        );
+        return format!("https://{}", rest.strip_suffix(".git").unwrap_or(rest));
     }
 
     // SSH: git@host:org/repo(.git)
@@ -106,7 +100,6 @@ fn main() {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,4 +146,3 @@ mod tests {
         normalize_remote("ssh://example.com/org/project.git");
     }
 }
-
