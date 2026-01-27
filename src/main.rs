@@ -16,8 +16,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Link to a pull request for the current branch
+    /// Link to a pull request / merge request for the current branch
     Pr,
+    /// Link to a merge request / pull request for the current branch
+    Mr,
 }
 
 fn run(cmd: &str, args: &[&str]) -> String {
@@ -54,8 +56,29 @@ pub fn normalize_remote(remote: &str) -> String {
     panic!("Unrecognized remote URL format: {}", remote);
 }
 
+fn is_gitlab_repo(repo_url: &str) -> bool {
+    repo_url.contains("gitlab")
+}
+
+/// Create a Pull Request url, assuming the remote is GitHub, or a URL-compatible site.
 pub fn pr_url(repo_url: &str, branch: &str) -> String {
     format!("{}/pull/new/{}", repo_url, branch)
+}
+
+/// Create a Merge Request url, assuming the remote is GitLab, or a URL-compatible site.
+pub fn mr_url(repo_url: &str, branch: &str) -> String {
+    format!(
+        "{}/-/merge_requests/new?merge_request[source_branch]={}",
+        repo_url, branch
+    )
+}
+
+fn link_for_command(repo_url: &str, branch: &str) -> String {
+    if is_gitlab_repo(repo_url) {
+        mr_url(repo_url, branch)
+    } else {
+        pr_url(repo_url, branch)
+    }
 }
 
 fn open_in_browser(url: &str) {
@@ -80,21 +103,21 @@ fn main() {
     let repo_url = normalize_remote(&remote);
 
     let final_url = match cli.command {
-        Some(Commands::Pr) => {
+        Some(Commands::Pr | Commands::Mr) => {
             let branch = run("git", &["symbolic-ref", "--short", "HEAD"]);
             if branch.is_empty() {
                 eprintln!("Not on a branch");
                 exit(1);
             }
-            pr_url(&repo_url, &branch)
+            link_for_command(&repo_url, &branch)
         }
         None => repo_url,
     };
 
-    // Always print
+    // Always print (whether or not opening in a browser).
     println!("{}", final_url);
 
-    // Optionally open
+    // Optionally open in web browser.
     if cli.open {
         open_in_browser(&final_url);
     }
@@ -144,5 +167,29 @@ mod tests {
     #[should_panic(expected = "Unrecognized remote URL format")]
     fn invalid_remote_panics() {
         normalize_remote("ssh://example.com/org/project.git");
+    }
+
+    #[test]
+    fn github_pr_url() {
+        let repo = "https://github.com/org/project";
+        let branch = "feature-x";
+        let expected = "https://github.com/org/project/pull/new/feature-x";
+        assert_eq!(link_for_command(repo, branch), expected);
+    }
+
+    #[test]
+    fn gitlab_mr_url() {
+        let repo = "https://gitlab.com/org/project";
+        let branch = "feature-x";
+        let expected = "https://gitlab.com/org/project/-/merge_requests/new?merge_request[source_branch]=feature-x";
+        assert_eq!(link_for_command(repo, branch), expected);
+    }
+
+    #[test]
+    fn self_hosted_gitlab_mr_url() {
+        let repo = "https://gitlab.example.com/org/project";
+        let branch = "dev";
+        let expected = "https://gitlab.example.com/org/project/-/merge_requests/new?merge_request[source_branch]=dev";
+        assert_eq!(link_for_command(repo, branch), expected);
     }
 }
