@@ -1,14 +1,18 @@
 use clap::{Parser, Subcommand};
 use std::process::{Command, exit};
 
-/// Generate links for the current Git repository
+/// Generate links for the current Git repository.
 #[derive(Parser)]
 #[command(name = "git-link")]
 #[command(author, version, about)]
 struct Cli {
-    /// Open the URL in the browser
+    /// Open the URL in the browser.
     #[arg(short = 'o', long, global = true)]
     open: bool,
+
+    /// Show verbose output.
+    #[arg(short = 'v', long, global = true)]
+    verbose: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -22,18 +26,34 @@ enum Commands {
     Mr,
 }
 
-fn run(cmd: &str, args: &[&str]) -> String {
+fn run_shell_cmd(cmd: &str, args: &[&str], verbose: bool) -> String {
+    if verbose {
+        println!("Running shell command: {} {:?}", cmd, args);
+    }
+
     let output = Command::new(cmd).args(args).output().unwrap_or_else(|_| {
         eprintln!("Failed to run {}", cmd);
         exit(1);
     });
 
     if !output.status.success() {
-        eprintln!("Command failed: {} {:?}", cmd, args);
+        eprintln!(
+            "Command failed (exit code {}): {} {:?}",
+            output.status, cmd, args
+        );
         exit(1);
     }
 
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
+    let output_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    if verbose {
+        println!(
+            "Command output (exit code {}): {}",
+            output.status, output_str
+        );
+    }
+
+    output_str
 }
 
 pub fn normalize_remote(remote: &str) -> String {
@@ -94,7 +114,11 @@ fn open_in_browser(url: &str) {
 fn main() {
     let cli = Cli::parse();
 
-    let remote = run("git", &["config", "--get", "remote.origin.url"]);
+    let remote = run_shell_cmd(
+        "git",
+        &["config", "--get", "remote.origin.url"],
+        cli.verbose,
+    );
     if remote.is_empty() {
         eprintln!("No origin remote found");
         exit(1);
@@ -102,9 +126,13 @@ fn main() {
 
     let repo_url = normalize_remote(&remote);
 
+    if cli.verbose {
+        println!("Repo URL: {}", repo_url);
+    }
+
     let final_url = match cli.command {
         Some(Commands::Pr | Commands::Mr) => {
-            let branch = run("git", &["symbolic-ref", "--short", "HEAD"]);
+            let branch = run_shell_cmd("git", &["symbolic-ref", "--short", "HEAD"], cli.verbose);
             if branch.is_empty() {
                 eprintln!("Not on a branch");
                 exit(1);
