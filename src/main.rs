@@ -94,9 +94,7 @@ pub fn normalize_remote(remote: &str) -> String {
     let url = url.strip_suffix(".git").unwrap_or(&url).to_string();
     let url = url.strip_suffix("/").unwrap_or(&url).to_string();
     let url = url.strip_suffix(".git").unwrap_or(&url).to_string();
-    let url = url.strip_suffix("/").unwrap_or(&url).to_string();
-
-    url
+    url.strip_suffix("/").unwrap_or(&url).to_string()
 }
 
 /// Extract the domain from an HTTP(S) repository URL.
