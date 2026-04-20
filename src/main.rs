@@ -170,6 +170,22 @@ mod tests {
     }
 
     #[test]
+    fn ssh_remote_with_git_suffix_with_ssh_prefix() {
+        // This is the Codeberg style.
+        let input = "ssh://git@example.com:org/project.git";
+        let expected = "https://example.com/org/project";
+        assert_eq!(normalize_remote(input), expected);
+    }
+
+    #[test]
+    fn ssh_remote_without_git_suffix_with_ssh_prefix() {
+        // This is similar to the Codeberg style.
+        let input = "ssh://git@example.com:org/project";
+        let expected = "https://example.com/org/project";
+        assert_eq!(normalize_remote(input), expected);
+    }
+
+    #[test]
     fn https_remote_with_git_suffix() {
         let input = "https://example.com/org/project.git";
         let expected = "https://example.com/org/project";
