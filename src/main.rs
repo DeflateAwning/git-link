@@ -26,6 +26,12 @@ enum Commands {
     Mr,
 }
 
+pub enum RemoteFlavor {
+    Github,
+    Gitlab,
+    Codeberg,
+}
+
 fn run_shell_cmd(cmd: &str, args: &[&str], verbose: bool) -> String {
     if verbose {
         println!("Running shell command: {} {:?}", cmd, args);
@@ -80,9 +86,27 @@ pub fn normalize_remote(remote: &str) -> String {
     panic!("Unrecognized remote URL format: {}", remote);
 }
 
-fn is_gitlab_repo(repo_url: &str) -> bool {
-    // TODO: There may be a better way to detect self-hosted GitLab repos.
-    repo_url.contains("gitlab")
+/// Extract the domain from an HTTP(S) repository URL.
+///
+/// On invalid input, returns the original string.
+pub fn extract_repo_domain(repo_url: &str) -> String {
+    let url = url::Url::parse(repo_url).unwrap();
+    url.host_str().unwrap_or(repo_url).to_string()
+}
+
+pub fn detect_remote_flavor(repo_url: &str) -> RemoteFlavor {
+    let repo_url_domain = extract_repo_domain(repo_url).to_lowercase();
+
+    if repo_url_domain.contains("github") {
+        RemoteFlavor::Github
+    } else if repo_url_domain.contains("gitlab") {
+        // TODO: There may be a better way to detect self-hosted GitLab repos.
+        RemoteFlavor::Gitlab
+    } else if repo_url_domain.contains("codeberg") {
+        RemoteFlavor::Codeberg
+    } else {
+        panic!("Unrecognized remote URL format: {}", repo_url);
+    }
 }
 
 /// Create a Pull Request url, assuming the remote is GitHub, or a URL-compatible site.
@@ -98,12 +122,23 @@ pub fn gitlab_mr_url(repo_url: &str, branch: &str) -> String {
     )
 }
 
+/// Create a Pull Request url, assuming the remote is Codeberg, or a URL-compatible site.
+///
+/// This is the closest to "new PR" which exists on Codeberg.
+pub fn codeberg_compare_url(repo_url: &str, branch: &str, default_branch: &str) -> String {
+    format!("{repo_url}/compare/{default_branch}...{branch}")
+}
+
 /// Create a Pull Request or Merge Request url, depending on the remote type.
 pub fn link_for_pr_mr(repo_url: &str, branch: &str) -> String {
-    if is_gitlab_repo(repo_url) {
-        gitlab_mr_url(repo_url, branch)
-    } else {
-        github_pr_url(repo_url, branch)
+    let flavor = detect_remote_flavor(repo_url);
+    match flavor {
+        RemoteFlavor::Github => github_pr_url(repo_url, branch),
+        RemoteFlavor::Gitlab => gitlab_mr_url(repo_url, branch),
+        RemoteFlavor::Codeberg => {
+            // TODO: Detect default branch better.
+            codeberg_compare_url(repo_url, branch, "main")
+        }
     }
 }
 
@@ -229,6 +264,14 @@ mod tests {
         let repo = "https://github.com/org/project";
         let branch = "feature-x";
         let expected = "https://github.com/org/project/pull/new/feature-x";
+        assert_eq!(link_for_pr_mr(repo, branch), expected);
+    }
+
+    #[test]
+    fn test_codeberg_pr_url() {
+        let repo = "https://codeberg.org/org/project";
+        let branch = "feature-x";
+        let expected = "https://codeberg.org/org/project/compare/main...feature-x";
         assert_eq!(link_for_pr_mr(repo, branch), expected);
     }
 
