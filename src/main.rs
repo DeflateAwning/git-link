@@ -64,26 +64,38 @@ fn run_shell_cmd(cmd: &str, args: &[&str], verbose: bool) -> String {
 
 /// Normalize a remote URL (SSH, HTTPS) to a standard HTTPS format.
 pub fn normalize_remote(remote: &str) -> String {
-    // HTTPS: https://host/org/repo(.git)
-    if let Some(rest) = (remote.strip_prefix("https://")).or_else(|| remote.strip_prefix("http://"))
-    {
-        // Note: Always upgrade http to https for security.
-        return format!("https://{}", rest.strip_suffix(".git").unwrap_or(rest));
-    }
+    let url: String = {
+        if let Some(rest) =
+            (remote.strip_prefix("https://")).or_else(|| remote.strip_prefix("http://"))
+        {
+            // HTTPS: https://host/org/repo(.git).
+            // Note: Always upgrade http to https for security.
+            format!("https://{rest}")
+        } else if let Some(rest) = (remote.strip_prefix("ssh://git@"))
+            .or_else(|| remote.strip_prefix("git@"))
+            .or_else(|| remote.strip_prefix("git+ssh://"))
+            .or_else(|| remote.strip_prefix("ssh+git://"))
+        {
+            // SSH: git@host:org/repo(.git)
+            let mut parts = rest.splitn(2, ':');
 
-    // SSH: git@host:org/repo(.git)
-    if let Some(rest) = (remote.strip_prefix("ssh://git@")).or_else(|| remote.strip_prefix("git@"))
-    {
-        let rest = rest.strip_suffix(".git").unwrap_or(rest);
-        let mut parts = rest.splitn(2, ':');
+            let host = parts.next().unwrap();
+            let path = parts.next().unwrap_or("");
 
-        let host = parts.next().unwrap();
-        let path = parts.next().unwrap_or("");
+            format!("https://{}/{}", host, path)
+        } else if let Some(rest) = remote.strip_prefix("git://") {
+            format!("https://{}", rest)
+        } else {
+            panic!("Unrecognized remote URL format: {}", remote);
+        }
+    };
 
-        return format!("https://{}/{}", host, path);
-    }
+    let url = url.strip_suffix(".git").unwrap_or(&url).to_string();
+    let url = url.strip_suffix("/").unwrap_or(&url).to_string();
+    let url = url.strip_suffix(".git").unwrap_or(&url).to_string();
+    let url = url.strip_suffix("/").unwrap_or(&url).to_string();
 
-    panic!("Unrecognized remote URL format: {}", remote);
+    url
 }
 
 /// Extract the domain from an HTTP(S) repository URL.
