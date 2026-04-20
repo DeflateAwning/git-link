@@ -26,6 +26,12 @@ enum Commands {
     Mr,
 }
 
+pub enum RemoteFlavor {
+    Github,
+    Gitlab,
+    Codeberg,
+}
+
 fn run_shell_cmd(cmd: &str, args: &[&str], verbose: bool) -> String {
     if verbose {
         println!("Running shell command: {} {:?}", cmd, args);
@@ -56,14 +62,18 @@ fn run_shell_cmd(cmd: &str, args: &[&str], verbose: bool) -> String {
     output_str
 }
 
+/// Normalize a remote URL (SSH, HTTPS) to a standard HTTPS format.
 pub fn normalize_remote(remote: &str) -> String {
     // HTTPS: https://host/org/repo(.git)
-    if let Some(rest) = remote.strip_prefix("https://") {
+    if let Some(rest) = (remote.strip_prefix("https://")).or_else(|| remote.strip_prefix("http://"))
+    {
+        // Note: Always upgrade http to https for security.
         return format!("https://{}", rest.strip_suffix(".git").unwrap_or(rest));
     }
 
     // SSH: git@host:org/repo(.git)
-    if let Some(rest) = remote.strip_prefix("git@") {
+    if let Some(rest) = (remote.strip_prefix("ssh://git@")).or_else(|| remote.strip_prefix("git@"))
+    {
         let rest = rest.strip_suffix(".git").unwrap_or(rest);
         let mut parts = rest.splitn(2, ':');
 
@@ -76,28 +86,59 @@ pub fn normalize_remote(remote: &str) -> String {
     panic!("Unrecognized remote URL format: {}", remote);
 }
 
-fn is_gitlab_repo(repo_url: &str) -> bool {
-    repo_url.contains("gitlab")
+/// Extract the domain from an HTTP(S) repository URL.
+///
+/// On invalid input, returns the original string.
+pub fn extract_repo_domain(repo_url: &str) -> String {
+    let url = url::Url::parse(repo_url).unwrap();
+    url.host_str().unwrap_or(repo_url).to_string()
+}
+
+pub fn detect_remote_flavor(repo_url: &str) -> RemoteFlavor {
+    let repo_url_domain = extract_repo_domain(repo_url).to_lowercase();
+
+    if repo_url_domain.contains("github") {
+        RemoteFlavor::Github
+    } else if repo_url_domain.contains("gitlab") {
+        // TODO: There may be a better way to detect self-hosted GitLab repos.
+        RemoteFlavor::Gitlab
+    } else if repo_url_domain.contains("codeberg") {
+        RemoteFlavor::Codeberg
+    } else {
+        panic!("Unrecognized remote URL format: {}", repo_url);
+    }
 }
 
 /// Create a Pull Request url, assuming the remote is GitHub, or a URL-compatible site.
-pub fn pr_url(repo_url: &str, branch: &str) -> String {
+pub fn github_pr_url(repo_url: &str, branch: &str) -> String {
     format!("{}/pull/new/{}", repo_url, branch)
 }
 
 /// Create a Merge Request url, assuming the remote is GitLab, or a URL-compatible site.
-pub fn mr_url(repo_url: &str, branch: &str) -> String {
+pub fn gitlab_mr_url(repo_url: &str, branch: &str) -> String {
     format!(
         "{}/-/merge_requests/new?merge_request[source_branch]={}",
         repo_url, branch
     )
 }
 
-fn link_for_command(repo_url: &str, branch: &str) -> String {
-    if is_gitlab_repo(repo_url) {
-        mr_url(repo_url, branch)
-    } else {
-        pr_url(repo_url, branch)
+/// Create a Pull Request url, assuming the remote is Codeberg, or a URL-compatible site.
+///
+/// This is the closest to "new PR" which exists on Codeberg.
+pub fn codeberg_compare_url(repo_url: &str, branch: &str, default_branch: &str) -> String {
+    format!("{repo_url}/compare/{default_branch}...{branch}")
+}
+
+/// Create a Pull Request or Merge Request url, depending on the remote type.
+pub fn link_for_pr_mr(repo_url: &str, branch: &str) -> String {
+    let flavor = detect_remote_flavor(repo_url);
+    match flavor {
+        RemoteFlavor::Github => github_pr_url(repo_url, branch),
+        RemoteFlavor::Gitlab => gitlab_mr_url(repo_url, branch),
+        RemoteFlavor::Codeberg => {
+            // TODO: Detect default branch better.
+            codeberg_compare_url(repo_url, branch, "main")
+        }
     }
 }
 
@@ -137,7 +178,12 @@ fn main() {
                 eprintln!("Not on a branch");
                 exit(1);
             }
-            link_for_command(&repo_url, &branch)
+
+            if cli.verbose {
+                println!("Branch: {}", branch);
+            }
+
+            link_for_pr_mr(&repo_url, &branch)
         }
         None => repo_url,
     };
@@ -170,6 +216,22 @@ mod tests {
     }
 
     #[test]
+    fn ssh_remote_with_git_suffix_with_ssh_prefix() {
+        // This is the Codeberg style.
+        let input = "ssh://git@example.com:org/project.git";
+        let expected = "https://example.com/org/project";
+        assert_eq!(normalize_remote(input), expected);
+    }
+
+    #[test]
+    fn ssh_remote_without_git_suffix_with_ssh_prefix() {
+        // This is similar to the Codeberg style.
+        let input = "ssh://git@example.com:org/project";
+        let expected = "https://example.com/org/project";
+        assert_eq!(normalize_remote(input), expected);
+    }
+
+    #[test]
     fn https_remote_with_git_suffix() {
         let input = "https://example.com/org/project.git";
         let expected = "https://example.com/org/project";
@@ -188,7 +250,7 @@ mod tests {
         let repo_url = "https://example.com/org/project";
         let branch = "feature-branch";
         let expected = "https://example.com/org/project/pull/new/feature-branch";
-        assert_eq!(pr_url(repo_url, branch), expected);
+        assert_eq!(github_pr_url(repo_url, branch), expected);
     }
 
     #[test]
@@ -198,26 +260,34 @@ mod tests {
     }
 
     #[test]
-    fn github_pr_url() {
+    fn test_github_pr_url() {
         let repo = "https://github.com/org/project";
         let branch = "feature-x";
         let expected = "https://github.com/org/project/pull/new/feature-x";
-        assert_eq!(link_for_command(repo, branch), expected);
+        assert_eq!(link_for_pr_mr(repo, branch), expected);
     }
 
     #[test]
-    fn gitlab_mr_url() {
+    fn test_codeberg_pr_url() {
+        let repo = "https://codeberg.org/org/project";
+        let branch = "feature-x";
+        let expected = "https://codeberg.org/org/project/compare/main...feature-x";
+        assert_eq!(link_for_pr_mr(repo, branch), expected);
+    }
+
+    #[test]
+    fn test_gitlab_mr_url() {
         let repo = "https://gitlab.com/org/project";
         let branch = "feature-x";
         let expected = "https://gitlab.com/org/project/-/merge_requests/new?merge_request[source_branch]=feature-x";
-        assert_eq!(link_for_command(repo, branch), expected);
+        assert_eq!(link_for_pr_mr(repo, branch), expected);
     }
 
     #[test]
-    fn self_hosted_gitlab_mr_url() {
+    fn test_self_hosted_gitlab_mr_url() {
         let repo = "https://gitlab.example.com/org/project";
         let branch = "dev";
         let expected = "https://gitlab.example.com/org/project/-/merge_requests/new?merge_request[source_branch]=dev";
-        assert_eq!(link_for_command(repo, branch), expected);
+        assert_eq!(link_for_pr_mr(repo, branch), expected);
     }
 }
