@@ -104,11 +104,11 @@ pub fn normalize_remote(remote: &str) -> String {
 
     // Special case: Overleaf git remotes use git.overleaf.com/<project_id>,
     // but the browseable URL is overleaf.com/project/<project_id>.
-    if let Ok(parsed) = url::Url::parse(&url) {
-        if parsed.host_str() == Some("git.overleaf.com") {
-            let project_id = parsed.path().trim_start_matches('/');
-            return format!("https://overleaf.com/project/{project_id}");
-        }
+    if let Ok(parsed) = url::Url::parse(&url)
+        && parsed.host_str() == Some("git.overleaf.com")
+    {
+        let project_id = parsed.path().trim_start_matches('/');
+        return format!("https://overleaf.com/project/{project_id}");
     }
 
     url
