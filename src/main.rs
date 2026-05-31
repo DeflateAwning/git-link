@@ -31,6 +31,7 @@ pub enum RemoteFlavor {
     Github,
     Gitlab,
     Codeberg,
+    Overleaf,
 }
 
 fn run_shell_cmd(cmd: &str, args: &[&str], verbose: bool) -> String {
@@ -69,8 +70,13 @@ pub fn normalize_remote(remote: &str) -> String {
         if let Some(rest) =
             (remote.strip_prefix("https://")).or_else(|| remote.strip_prefix("http://"))
         {
-            // HTTPS: https://host/org/repo(.git).
-            // Note: Always upgrade http to https for security.
+            // HTTPS: https://[user[:pass]@]host/path.
+            // Upgrade http to https; strip credentials.
+            let rest = if let Some(at_pos) = rest.find('@') {
+                &rest[at_pos + 1..]
+            } else {
+                rest
+            };
             format!("https://{rest}")
         } else if let Some(rest) = (remote.strip_prefix("ssh://git@"))
             .or_else(|| remote.strip_prefix("git@"))
@@ -94,7 +100,18 @@ pub fn normalize_remote(remote: &str) -> String {
     let url = url.strip_suffix(".git").unwrap_or(&url).to_string();
     let url = url.strip_suffix("/").unwrap_or(&url).to_string();
     let url = url.strip_suffix(".git").unwrap_or(&url).to_string();
-    url.strip_suffix("/").unwrap_or(&url).to_string()
+    let url = url.strip_suffix("/").unwrap_or(&url).to_string();
+
+    // Special case: Overleaf git remotes use git.overleaf.com/<project_id>,
+    // but the browseable URL is overleaf.com/project/<project_id>.
+    if let Ok(parsed) = url::Url::parse(&url) {
+        if parsed.host_str() == Some("git.overleaf.com") {
+            let project_id = parsed.path().trim_start_matches('/');
+            return format!("https://overleaf.com/project/{project_id}");
+        }
+    }
+
+    url
 }
 
 /// Extract the domain from an HTTP(S) repository URL.
@@ -115,6 +132,8 @@ pub fn detect_remote_flavor(repo_url: &str) -> Option<RemoteFlavor> {
         Some(RemoteFlavor::Gitlab)
     } else if repo_url_domain.contains("codeberg") {
         Some(RemoteFlavor::Codeberg)
+    } else if repo_url_domain.contains("overleaf") {
+        Some(RemoteFlavor::Overleaf)
     } else {
         // Unknown remote flavor.
         None
@@ -158,6 +177,7 @@ pub fn link_for_pr_or_mr(repo_url: &str, branch: &str, verbose: bool) -> String 
             // TODO: Detect default branch better.
             codeberg_compare_url(repo_url, branch, "main")
         }
+        Some(RemoteFlavor::Overleaf) => repo_url.to_string(),
         None => repo_url.to_string(),
     }
 }
@@ -309,5 +329,33 @@ mod tests {
         let branch = "dev";
         let expected = "https://gitlab.example.com/org/project/-/merge_requests/new?merge_request[source_branch]=dev";
         assert_eq!(link_for_pr_or_mr(repo, branch, true), expected);
+    }
+
+    #[test]
+    fn overleaf_remote_with_credentials() {
+        let input = "https://git:mytoken123@git.overleaf.com/12381299812";
+        let expected = "https://overleaf.com/project/12381299812";
+        assert_eq!(normalize_remote(input), expected);
+    }
+
+    #[test]
+    fn overleaf_remote_without_credentials() {
+        let input = "https://git.overleaf.com/12381299812";
+        let expected = "https://overleaf.com/project/12381299812";
+        assert_eq!(normalize_remote(input), expected);
+    }
+
+    #[test]
+    fn overleaf_remote_with_git_suffix() {
+        let input = "https://git:tok@git.overleaf.com/12381299812.git";
+        let expected = "https://overleaf.com/project/12381299812";
+        assert_eq!(normalize_remote(input), expected);
+    }
+
+    #[test]
+    fn https_remote_strips_credentials() {
+        let input = "https://user:token@github.com/org/project";
+        let expected = "https://github.com/org/project";
+        assert_eq!(normalize_remote(input), expected);
     }
 }

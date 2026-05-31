@@ -9,6 +9,7 @@ cargo install git-link
 
 # Print out the git repo's remote URL (even if the remote is via SSH).
 git link
+# https://github.com/DeflateAwning/git-link
 
 # Open the URL.
 git link --open
@@ -30,7 +31,11 @@ Explanation: Any `git-xyz` command/binary available in path is available as a gi
 
 ## Features
 
-* Proven support for GitHub, GitLab, and Codeberg.
+* Proven support for many common and uncommon Git providers including:
+  * GitHub
+  * GitLab
+  * Codeberg
+  * Overleaf
 * Get a link for the repo's home page.
-* Get a link for a new PR for the current branch.
+* Get a link for a new PR/MR for the current branch.
 * Open links with the `-o` flag.
